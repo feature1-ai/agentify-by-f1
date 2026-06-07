@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  agentify-by-f1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentify-by-f1
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CONTEXT_DIR=${CONTEXT_DIR:-/app/resources/contexts}
+      - CODEX_MAX_TOKENS=${CODEX_MAX_TOKENS:-4000}
+      - CODEX_TEMPERATURE=${CODEX_TEMPERATURE:-0.7}
+      - API_KEY=${API_KEY}
+      - WEBHOOK_TIMEOUT=${WEBHOOK_TIMEOUT:-30000}
+      - WEBHOOK_RETRY_ATTEMPTS=${WEBHOOK_RETRY_ATTEMPTS:-3}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+    volumes:
+      - ./resources:/app/resources:ro
+      - logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  logs:
+    driver: local
+
+networks:
+  ai-network:
+    driver: bridge

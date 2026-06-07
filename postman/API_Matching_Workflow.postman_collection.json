@@ -1,0 +1,398 @@
+{
+  "info": {
+    "name": "agentify-by-f1 - API Matching Workflow",
+    "description": "Collection for testing the agentify-by-f1 API Matching Workflow that maps natural-language intent to REST API calls with human-in-the-loop approval. Examples use the bundled petstore.json sample spec — drop your own OpenAPI spec(s) into resources/contexts/ and change the wording to match your API.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "agentify-by-f1"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "your-api-key-here",
+      "type": "string"
+    },
+    {
+      "key": "workflowInstanceId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "value",
+        "value": "{{apiKey}}",
+        "type": "string"
+      },
+      {
+        "key": "key",
+        "value": "x-api-key",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Workflow Management",
+      "item": [
+        {
+          "name": "List Available Workflows",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows"]
+            },
+            "description": "Get list of all registered workflows in the system"
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflows",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "workflows"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "body": "{\n  \"success\": true,\n  \"workflows\": [\"api-matching\"],\n  \"count\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Workflow Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/api-matching",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "api-matching"]
+            },
+            "description": "Get information about a specific workflow and its instances"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Workflow Instance Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/{{workflowInstanceId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "{{workflowInstanceId}}", "status"]
+            },
+            "description": "Get the status of a specific workflow instance"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "API Matching Scenarios (Petstore sample)",
+      "item": [
+        {
+          "name": "List Available Pets",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has success flag\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "});",
+                  "",
+                  "pm.test(\"Instance ID is returned\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.instanceId).to.be.a('string');",
+                  "    pm.collectionVariables.set(\"workflowInstanceId\", jsonData.instanceId);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"workflowId\": \"api-matching\",\n    \"input\": \"list all pets that are available\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/execute",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "execute"]
+            },
+            "description": "Read-only request — the agent maps this to GET /pets against the bundled petstore spec."
+          },
+          "response": []
+        },
+        {
+          "name": "Create a Pet",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"workflowId\": \"api-matching\",\n    \"input\": \"add a new pet named Rex that is available\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/execute",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "execute"]
+            },
+            "description": "Maps to POST /pets. Every execution pauses for approval before running."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Pet by ID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"workflowId\": \"api-matching\",\n    \"input\": \"show me the details for pet 123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/execute",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "execute"]
+            },
+            "description": "Maps to GET /pets/{petId}."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a Pet (high-risk, requires approval)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"workflowId\": \"api-matching\",\n    \"input\": \"delete pet 123\",\n    \"config\": {\n        \"approval\": {\n            \"requireApproval\": true,\n            \"autoApproveRiskLevel\": \"none\"\n        }\n    }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/execute",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "execute"]
+            },
+            "description": "Maps to DELETE /pets/{petId} — a destructive action that returns an approval request before executing."
+          },
+          "response": []
+        },
+        {
+          "name": "List Pets (with per-request credentials)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"workflowId\": \"api-matching\",\n    \"input\": \"list all pets\",\n    \"credentials\": {\n        \"baseUrl\": \"https://api.example.com\",\n        \"authHeaderName\": \"Authorization\",\n        \"authHeaderValue\": \"Bearer eyJ...\"\n    }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/execute",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "execute"]
+            },
+            "description": "Same request, but the downstream API base URL + auth are supplied per request instead of via server-wide env. Each end-user can pass their own token."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Workflow Execution Options",
+      "item": [
+        {
+          "name": "Async Execution with Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"workflowId\": \"api-matching\",\n    \"input\": \"list all pets that are available\",\n    \"async\": true,\n    \"webhookUrl\": \"https://webhook.site/your-webhook-url\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/execute",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "execute"]
+            },
+            "description": "Execute workflow asynchronously with a webhook callback"
+          },
+          "response": []
+        },
+        {
+          "name": "Stream Workflow Execution",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"workflowId\": \"api-matching\",\n    \"input\": \"list all pets that are available\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/stream",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "stream"]
+            },
+            "description": "Stream workflow execution events in real-time (SSE)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Approval Management",
+      "item": [
+        {
+          "name": "Approve Pending Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"decision\": \"approved\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/{{workflowInstanceId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "{{workflowInstanceId}}", "approve"]
+            },
+            "description": "Approve a pending workflow action and run it"
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Pending Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"decision\": \"rejected\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workflows/{{workflowInstanceId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "workflows", "{{workflowInstanceId}}", "approve"]
+            },
+            "description": "Reject a pending workflow action"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health & Monitoring",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Check if the service is running"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Log response time",
+          "console.log(`Response time: ${pm.response.responseTime}ms`);"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "javascript": {
+    "style": "ES6+",
+    "indentation": 2,
+    "semicolons": true,
+    "quotes": "single",
+    "naming": {
+      "variables": "camelCase",
+      "constants": "UPPER_SNAKE_CASE",
+      "classes": "PascalCase",
+      "functions": "camelCase"
+    }
+  },
+  "python": {
+    "style": "PEP 8",
+    "indentation": 4,
+    "quotes": "single or double",
+    "naming": {
+      "variables": "snake_case",
+      "constants": "UPPER_SNAKE_CASE",
+      "classes": "PascalCase",
+      "functions": "snake_case"
+    }
+  },
+  "typescript": {
+    "style": "ES6+ with types",
+    "indentation": 2,
+    "semicolons": true,
+    "quotes": "single",
+    "naming": {
+      "variables": "camelCase",
+      "constants": "UPPER_SNAKE_CASE",
+      "classes": "PascalCase",
+      "functions": "camelCase",
+      "interfaces": "IPascalCase or PascalCase"
+    }
+  }
+}

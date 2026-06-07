@@ -1,0 +1,58 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Petstore (example)",
+    "version": "1.0.0",
+    "description": "Minimal OpenAPI sample shipped with agentify-by-f1 so the service is functional out of the box. Replace this file with your own spec(s) to point the agent at your own API."
+  },
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "listPets",
+        "summary": "List all pets",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "A paged array of pets" } }
+      },
+      "post": {
+        "operationId": "createPet",
+        "summary": "Create a pet",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "tag":  { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Pet created" } }
+      }
+    },
+    "/pets/{petId}": {
+      "get": {
+        "operationId": "getPetById",
+        "summary": "Get a pet by id",
+        "parameters": [
+          { "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Expected response to a valid request" } }
+      },
+      "delete": {
+        "operationId": "deletePet",
+        "summary": "Delete a pet",
+        "parameters": [
+          { "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Pet deleted" } }
+      }
+    }
+  }
+}
