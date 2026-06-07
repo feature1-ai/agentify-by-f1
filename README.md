@@ -13,6 +13,7 @@ Built on a LangGraph workflow that uses the OpenAI Codex exec for reasoning — 
 - 🧠 **Codex-powered reasoning** — uses the OpenAI Codex exec (server-wide login, no per-request keys); isolated behind an executor so it can be extended to other agent runtimes
 - ✋ **Human-in-the-loop approval** — every execution pauses for confirmation
 - 🔑 **Per-user API credentials** — each chat user can pass their own downstream auth, or fall back to server-wide env defaults
+- 🔒 **No database access** — works only through your existing REST API, inheriting its auth, validation, and rate limits; no DB credentials, no data pipeline
 - 🌐 **REST + SSE API** — sync execution, async with webhook callbacks, server-sent event streaming
 - 🐳 **One-command Docker** — `docker-compose up` and you're live
 - 🧩 **Extensible workflows** — subclass `BaseWorkflow` to compose your own LangGraph DAG
@@ -127,6 +128,17 @@ curl -X POST http://localhost:3000/api/workflows/execute \
 ```
 
 The live credential is held only on the in-memory workflow instance for the duration of the request (including the approval step); the copy kept on the instance record is redacted, so it never appears in `GET /api/instances/:id`.
+
+## No direct data access
+
+agentify-by-f1 never touches your database, data warehouse, or internal data stores. It operates **exclusively through your existing REST API** — the same endpoints your app already exposes. The agent is just another API client.
+
+- **Nothing new to expose.** No DB credentials, no read replica, no data pipeline, no raw queries. If your API can do it, the agent can; if it can't, the agent can't.
+- **Your existing authorization still applies.** Calls go out with the caller's auth (per-request `credentials` or a server-wide token), so every permission check, validation rule, rate limit, and audit log your API already enforces applies unchanged — the agent can't exceed what that credential is allowed to do.
+- **Smaller blast radius.** A misbehaving or compromised agent is bounded by the API surface and the credential's scope; it cannot bypass the API to read or write data directly.
+- **No schema coupling.** It reasons over your OpenAPI spec, not your database schema, so internal data-model changes stay invisible to the agent.
+
+In short: adopting agentify-by-f1 is a matter of pointing it at an API you already trust — not granting a new system access to production data.
 
 ## Embedding in your SPA
 
