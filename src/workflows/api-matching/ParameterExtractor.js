@@ -1,30 +1,10 @@
-import logger from '../../utils/logger.js';
+import logger from '../../logger.js';
 
 /**
  * ParameterExtractor - Responsible for extracting and building API parameters
  * Single Responsibility: Parameter extraction and request body construction
  */
 export class ParameterExtractor {
-  constructor() {
-    this.parameterPatterns = this.initializePatterns();
-  }
-
-  initializePatterns() {
-    return {
-      pathParams: {
-        userId: /user[_-]?(\w+)|@(\w+)|uid[_-]?(\w+)/gi,
-        petId: /pet[_-]?(\w+)|pid[_-]?(\w+)/gi,
-        orderId: /order[_-]?(\w+)|oid[_-]?(\w+)/gi
-      },
-      dataTypes: {
-        email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-        phone: /^\+?[\d\s-()]+$/,
-        uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-        numeric: /^\d+$/
-      }
-    };
-  }
-
   /**
    * Extract parameters for API calls based on intent and matched APIs
    */

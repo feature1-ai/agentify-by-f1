@@ -1,20 +1,10 @@
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import logger from '../../utils/logger.js';
+import logger from '../../logger.js';
+import { resolveContextDir } from '../../contextDir.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const DEFAULT_CONTEXT_DIR = path.join(__dirname, '../../../resources/contexts');
 const RULES_FILENAME = 'context-rules.json';
-
-function resolveContextDir() {
-  const value = process.env.CONTEXT_DIR;
-  if (!value) return DEFAULT_CONTEXT_DIR;
-  return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
-}
 
 /**
  * ContextSelector — selects which OpenAPI spec files are relevant for a request.
@@ -23,7 +13,8 @@ function resolveContextDir() {
  * spec and return all of them. The LLM does the heavy lifting downstream.
  *
  * Optional: drop a `context-rules.json` in CONTEXT_DIR to define keyword→file
- * scoring and multi-file scenario patterns. Shape:
+ * scoring and multi-file scenario patterns — useful when the spec set is large
+ * enough that sending all of them blows the model's context window. Shape:
  *
  * {
  *   "services": {
@@ -39,8 +30,7 @@ function resolveContextDir() {
  * }
  */
 export class ContextSelector {
-  constructor(codexExecutor = null) {
-    this.codexExecutor = codexExecutor;
+  constructor() {
     this.serviceKeywords = {};
     this.scenarioPatterns = [];
     this.rulesLoaded = false;
@@ -66,6 +56,10 @@ export class ContextSelector {
     }
   }
 
+  /**
+   * Returns the spec filenames to load for this request: scenario match first,
+   * then keyword scoring, then (no rules / no match) every spec in the dir.
+   */
   async selectContexts(userInput) {
     try {
       const inputStr = typeof userInput === 'string' ? userInput : String(userInput || '');
@@ -130,59 +124,22 @@ export class ContextSelector {
     }
   }
 
-  async loadAllContexts() {
-    try {
-      const contextPath = resolveContextDir();
-      const swaggerFiles = await this.listAllSpecs();
-
-      const contexts = {};
-      for (const file of swaggerFiles) {
-        try {
-          const content = await fs.readFile(path.join(contextPath, file), 'utf-8');
-          contexts[file] = JSON.parse(content);
-        } catch (error) {
-          logger.warn(`Failed to load ${file}:`, error.message);
-        }
-      }
-      return contexts;
-    } catch (error) {
-      logger.error('Failed to load contexts:', error);
-      return {};
-    }
-  }
-
-  async getRecommendations(userInput) {
-    if (!this.rulesLoaded) return [];
-    const input = userInput.toLowerCase();
-    const recommendations = [];
-    for (const [service, config] of Object.entries(this.serviceKeywords)) {
-      let confidence = 0;
-      const matches = { keywords: [], actions: [] };
-      for (const keyword of config.keywords || []) {
-        if (input.includes(keyword.toLowerCase())) {
-          matches.keywords.push(keyword);
-          confidence += 0.2;
-        }
-      }
-      for (const action of config.actions || []) {
-        if (input.includes(action.toLowerCase())) {
-          matches.actions.push(action);
-          confidence += 0.3;
-        }
-      }
-      if (confidence > 0) {
-        recommendations.push({
-          service,
-          confidence: Math.min(confidence, 1),
-          matches,
-          priority: config.priority ?? 5
-        });
+  /**
+   * Load the given spec files (filename → parsed content). Unreadable files
+   * are skipped with a warning rather than failing the whole request.
+   */
+  async loadContexts(files) {
+    const contextPath = resolveContextDir();
+    const contexts = {};
+    for (const file of files) {
+      try {
+        const content = await fs.readFile(path.join(contextPath, file), 'utf-8');
+        contexts[file] = JSON.parse(content);
+      } catch (error) {
+        logger.warn(`Failed to load ${file}:`, error.message);
       }
     }
-    recommendations.sort((a, b) =>
-      b.confidence !== a.confidence ? b.confidence - a.confidence : a.priority - b.priority
-    );
-    return recommendations;
+    return contexts;
   }
 }
 

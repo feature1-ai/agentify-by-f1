@@ -20,15 +20,10 @@ describe('Project Setup Tests', () => {
 
   test('required directories exist', () => {
     const requiredDirs = [
-      'src/core',
       'src/workflows',
-      'src/api',
-      'src/services',
-      'src/utils',
+      'src/workflows/api-matching',
       'src/executors',
-      'resources/contexts',
-      'resources/templates',
-      'resources/schemas'
+      'resources/contexts'
     ];
 
     requiredDirs.forEach(dir => {

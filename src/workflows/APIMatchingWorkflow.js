@@ -1,40 +1,39 @@
 import { END } from "@langchain/langgraph";
-import BaseWorkflow from '../core/BaseWorkflow.js';
+import BaseWorkflow, { lastWriteChannel } from './BaseWorkflow.js';
 import CodexExecutor from '../executors/CodexExecutor.js';
 import RestExecutor from '../executors/RestExecutor.js';
-import logger from '../utils/logger.js';
+import logger from '../logger.js';
 
-// Import all API Matching Workflow services from single location
-import {
-  IntentAnalyzer,
-  APIMapper,
-  ParameterExtractor,
-  ApprovalManager,
-  ResponseFormatter
-} from '../services/api_matching_workflow/index.js';
-import ContextSelector from '../services/api_matching_workflow/ContextSelector.js';
+import APIMapper from './api-matching/APIMapper.js';
+import ParameterExtractor from './api-matching/ParameterExtractor.js';
+import ApprovalManager from './api-matching/ApprovalManager.js';
+import ResponseFormatter from './api-matching/ResponseFormatter.js';
+import ContextSelector from './api-matching/ContextSelector.js';
 
 /**
- * APIMatchingWorkflow - Refactored version using modular services
- * Clean separation of concerns with single responsibility modules
+ * APIMatchingWorkflow — maps a natural-language request onto the user's REST
+ * API via their OpenAPI specs, pauses for mandatory approval, then executes.
+ *
+ * DAG: initialize → mapAPIs → extractParameters → requestApproval →
+ *      executeAPIs → formatResponse → finalize
  */
 export class APIMatchingWorkflow extends BaseWorkflow {
   constructor(workflowId, config = {}) {
     super(workflowId, config);
 
-    // Initialize executors
-    this.codexExecutor = new CodexExecutor(config.codex || {});
-    this.restExecutor = new RestExecutor(config.rest || {});
+    // The reasoning layer is pluggable: pass ready-made executor instances via
+    // config to swap the backend (or to stub them in tests); otherwise the
+    // defaults are built from env-driven config.
+    this.codexExecutor = config.codexExecutor || new CodexExecutor(config.codex || {});
+    this.restExecutor = config.restExecutor || new RestExecutor(config.rest || {});
 
-    // Initialize services with single responsibilities
-    this.contextSelector = new ContextSelector(this.codexExecutor);
-    this.intentAnalyzer = new IntentAnalyzer(this.codexExecutor);
+    this.contextSelector = new ContextSelector();
     this.apiMapper = new APIMapper(this.codexExecutor);
     this.parameterExtractor = new ParameterExtractor();
     this.approvalManager = new ApprovalManager(config.approval || {});
     this.responseFormatter = new ResponseFormatter(config.response || {});
 
-    // Workflow state
+    // Approval pause/resume state (single in-flight approval per instance)
     this.currentApprovalId = null;
     this.pendingApprovalState = null;
     this.lastExecutionResult = null;
@@ -55,13 +54,20 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     });
   }
 
+  // The workflow surfaces which specs the agent judged relevant as a
+  // top-level state key, so it must be a declared channel.
+  defineChannels() {
+    return {
+      ...super.defineChannels(),
+      identifiedSwaggerDocs: lastWriteChannel(() => [])
+    };
+  }
+
   defineNodes(workflow) {
-    // Define our own initialize and finalize nodes
     workflow.addNode("initialize", this.initializeNode.bind(this));
     workflow.addNode("finalize", this.finalizeNode.bind(this));
     workflow.addNode("handleError", this.handleErrorNode.bind(this));
 
-    // Each node delegates to a specific service
     workflow.addNode("mapAPIs", this.mapAPIsNode.bind(this));
     workflow.addNode("extractParameters", this.extractParametersNode.bind(this));
     workflow.addNode("requestApproval", this.requestApprovalNode.bind(this));
@@ -98,46 +104,73 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     workflow.addEdge("finalize", END);
   }
 
+  async initializeNode(state) {
+    logger.info(`Initializing API matching workflow: ${this.workflowId}`);
 
-  /**
-   * Node: Map intent to APIs
-   */
+    try {
+      const userInput = state.messages[0]?.content?.userInput ||
+                       state.messages[0]?.content ||
+                       "";
+
+      // context-rules.json (if present) narrows which specs are loaded;
+      // without rules every spec in CONTEXT_DIR is a candidate.
+      const selectedFiles = await this.contextSelector.selectContexts(userInput);
+      const allSwaggerDocs = await this.contextSelector.loadContexts(selectedFiles);
+      logger.info(`Loaded ${Object.keys(allSwaggerDocs).length} Swagger context(s) for agent analysis`);
+
+      return {
+        ...state,
+        currentNode: "initialize",
+        metadata: {
+          ...state.metadata,
+          startTime: new Date().toISOString(),
+          workflowId: this.workflowId,
+          userInput,
+          allSwaggerDocs
+        }
+      };
+    } catch (error) {
+      logger.error('Initialization error:', error);
+      return {
+        ...state,
+        currentNode: "initialize",
+        metadata: {
+          ...state.metadata,
+          startTime: new Date().toISOString(),
+          workflowId: this.workflowId
+        },
+        errors: [...state.errors, `Initialization error: ${error.message}`]
+      };
+    }
+  }
+
   async mapAPIsNode(state) {
     try {
       const { allSwaggerDocs, userInput } = state.metadata;
-      
-      // Use optimized single AI call for intent analysis, context selection, and API mapping
-      const result = await this.apiMapper.mapToAPIs(null, allSwaggerDocs, userInput, {
+
+      // Single agent call performs intent analysis, context selection, and
+      // API mapping together.
+      const result = await this.apiMapper.mapToAPIs(allSwaggerDocs, userInput, {
         onProgress: (progress) => this.emitStreamProgress({
           stage: "api_mapping",
           ...progress
         })
       });
 
-      // Extract intent, context selection, and API calls from the combined result
-      let intent, apiCalls, relevantSwaggerDocs;
-      
-      if (result.intent && result.apiCalls && result.relevantSwaggerDocs) {
-        // New optimized format with intent analysis
-        intent = result.intent;
-        apiCalls = result.apiCalls;
-        relevantSwaggerDocs = result.relevantSwaggerDocs;
-        logger.info(`Complete analysis: ${intent.action} ${intent.resource}, selected ${relevantSwaggerDocs.length} contexts, mapped to ${apiCalls.length} API calls`);
-      } else if (result.apiCalls && result.relevantSwaggerDocs) {
-        // Partial optimized format
-        intent = { action: 'unknown', resource: 'unknown', entities: [], conditions: {}, riskLevel: 'medium' };
-        apiCalls = result.apiCalls;
-        relevantSwaggerDocs = result.relevantSwaggerDocs;
-        logger.info(`Partial mapping: selected ${relevantSwaggerDocs.length} contexts, mapped to ${apiCalls.length} API calls`);
-      } else if (Array.isArray(result)) {
-        // Legacy format (fallback)
-        intent = { action: 'unknown', resource: 'unknown', entities: [], conditions: {}, riskLevel: 'medium' };
-        apiCalls = result;
-        relevantSwaggerDocs = ['unknown'];
-        logger.info(`Legacy mapping: mapped to ${apiCalls.length} API calls`);
-      } else {
-        throw new Error('Unexpected mapping result format');
+      if (!Array.isArray(result.apiCalls)) {
+        throw new Error('Agent response did not include an apiCalls array');
       }
+
+      const intent = result.intent || {
+        action: 'unknown',
+        resource: 'unknown',
+        entities: [],
+        conditions: {},
+        riskLevel: 'medium'
+      };
+      const relevantSwaggerDocs = result.relevantSwaggerDocs || [];
+
+      logger.info(`Mapped intent ${intent.action} ${intent.resource} to ${result.apiCalls.length} API call(s) across ${relevantSwaggerDocs.length} spec(s)`);
 
       return {
         ...state,
@@ -145,7 +178,7 @@ export class APIMatchingWorkflow extends BaseWorkflow {
         metadata: {
           ...state.metadata,
           intent,
-          apiCalls,
+          apiCalls: result.apiCalls,
           selectedContexts: relevantSwaggerDocs
         },
         identifiedSwaggerDocs: relevantSwaggerDocs
@@ -160,15 +193,11 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     }
   }
 
-  /**
-   * Node: Extract parameters
-   */
   async extractParametersNode(state) {
     try {
       const { intent, apiCalls } = state.metadata;
       const apiCallsWithParams = this.parameterExtractor.extractParameters(intent, apiCalls);
 
-      // Validate parameters
       const validation = this.parameterExtractor.validateParameters(apiCallsWithParams);
 
       if (!validation.allValid) {
@@ -205,9 +234,6 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     }
   }
 
-  /**
-   * Node: Request approval
-   */
   async requestApprovalNode(state) {
     try {
       const { intent, apiCallsWithParams, userInput } = state.metadata;
@@ -254,29 +280,22 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     }
   }
 
-  /**
-   * Node: Execute APIs
-   */
   async executeAPIsNode(state) {
     try {
       const { apiCallsWithParams, approvalId } = state.metadata;
 
-      // Verify approval if needed
       if (approvalId && !this.approvalManager.isApprovalValid(approvalId)) {
         throw new Error("Invalid or expired approval");
       }
 
-      // Log audit event
       await this.restExecutor.logAuditEvent({
         action: "api_execution_started",
         workflowId: this.workflowId,
         apiCalls: apiCallsWithParams.length
       });
 
-      // Execute API calls
       const results = await this.restExecutor.executeBulkAPICalls(apiCallsWithParams);
 
-      // Log completion
       await this.restExecutor.logAuditEvent({
         action: "api_execution_completed",
         workflowId: this.workflowId,
@@ -304,9 +323,6 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     }
   }
 
-  /**
-   * Node: Format response
-   */
   async formatResponseNode(state) {
     try {
       const {
@@ -321,6 +337,7 @@ export class APIMatchingWorkflow extends BaseWorkflow {
         approvalId: this.currentApprovalId,
         rejected: approvalStatus === "rejected",
         pending: approvalStatus === "pending",
+        rejectionReason: state.metadata.rejectionReason,
         executionTime: state.metadata.executionTime
       };
 
@@ -346,7 +363,6 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     } catch (error) {
       logger.error("Response formatting failed:", error);
 
-      // Fallback to simple error message
       const errorMessage = this.responseFormatter.formatError(
         error,
         state.metadata.userInput
@@ -363,21 +379,14 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     }
   }
 
-  /**
-   * Route from parameter extraction - always require approval
-   */
+  // Approval is mandatory for every execution; the only branch is error.
   routeFromParameters(state) {
     if (state.errors.length > 0) {
       return "error";
     }
-
-    // Always require approval for all API executions
     return "approve";
   }
 
-  /**
-   * Route from approval
-   */
   routeFromApproval(state) {
     const { approvalStatus } = state.metadata;
 
@@ -391,7 +400,7 @@ export class APIMatchingWorkflow extends BaseWorkflow {
   }
 
   /**
-   * Process approval response (called externally)
+   * Process approval response (called externally via the approve endpoint).
    */
   async processApprovalResponse(response) {
     if (!this.currentApprovalId) {
@@ -407,7 +416,7 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     );
 
     if (result.success && result.status === "approved") {
-      const workflowResult = await this.executeApprovedWorkflow();
+      const workflowResult = await this.resumeFromApproval("approved");
       return {
         success: true,
         status: "approved",
@@ -416,7 +425,7 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     }
 
     if (result.success && result.status === "rejected") {
-      const workflowResult = await this.buildRejectedWorkflowResult(result.reason);
+      const workflowResult = await this.resumeFromApproval("rejected", result.reason);
       return {
         success: true,
         status: "rejected",
@@ -429,122 +438,51 @@ export class APIMatchingWorkflow extends BaseWorkflow {
   }
 
   /**
-   * Continue workflow after approval
+   * Resume the paused workflow after an approval decision.
+   *
+   * NOTE: this mirrors the tail of the DAG (executeAPIs → formatResponse →
+   * finalize, with executeAPIs skipped on rejection). If defineEdges changes
+   * downstream of requestApproval, update this sequence to match.
    */
-  async continueFromApproval() {
-    return this.executeApprovedWorkflow();
-  }
-
-  async executeApprovedWorkflow() {
+  async resumeFromApproval(decision, reason) {
     if (!this.pendingApprovalState) {
       throw new Error("No pending workflow state to resume");
     }
 
-    const approvedState = {
+    let state = {
       ...this.pendingApprovalState,
       metadata: {
         ...this.pendingApprovalState.metadata,
-        approvalStatus: "approved"
+        approvalStatus: decision,
+        ...(reason && { rejectionReason: reason })
       }
     };
 
-    const executedState = await this.executeAPIsNode(approvedState);
-    const formattedState = await this.formatResponseNode(executedState);
-    const finalizedState = await this.finalizeNode(formattedState);
+    if (decision === "approved") {
+      state = await this.executeAPIsNode(state);
+    }
+    state = await this.formatResponseNode(state);
+    state = await this.finalizeNode(state);
 
     this.pendingApprovalState = null;
     this.currentApprovalId = null;
-    this.lastExecutionResult = finalizedState;
+    this.lastExecutionResult = state;
 
-    return finalizedState;
-  }
-
-  async buildRejectedWorkflowResult(reason = "User rejected") {
-    if (!this.pendingApprovalState) {
-      throw new Error("No pending workflow state to reject");
-    }
-
-    const rejectedState = {
-      ...this.pendingApprovalState,
-      metadata: {
-        ...this.pendingApprovalState.metadata,
-        approvalStatus: "rejected",
-        rejectionReason: reason
-      }
-    };
-
-    const formattedState = await this.formatResponseNode(rejectedState);
-    const finalizedState = await this.finalizeNode(formattedState);
-
-    this.pendingApprovalState = null;
-    this.currentApprovalId = null;
-    this.lastExecutionResult = finalizedState;
-
-    return finalizedState;
-  }
-
-  /**
-   * Base workflow nodes
-   */
-  async initializeNode(state) {
-    logger.info(`Initializing API matching workflow: ${this.workflowId}`);
-
-    try {
-      // Extract user input
-      const userInput = state.messages[0]?.content?.userInput ||
-                       state.messages[0]?.content ||
-                       "";
-
-      // Load all contexts for the AI to examine (optimization: no pre-selection)
-      const allSwaggerDocs = await this.contextSelector.loadAllContexts();
-      logger.info(`Loaded all Swagger contexts for AI analysis`);
-
-      return {
-        ...state,
-        currentNode: "initialize",
-        metadata: {
-          ...state.metadata,
-          startTime: new Date().toISOString(),
-          workflowId: this.workflowId,
-          userInput,
-          allSwaggerDocs
-        }
-      };
-    } catch (error) {
-      logger.error('Initialization error:', error);
-      return {
-        ...state,
-        currentNode: "initialize",
-        metadata: {
-          ...state.metadata,
-          startTime: new Date().toISOString(),
-          workflowId: this.workflowId
-        },
-        context: {
-          ...state.context,
-          ...this.contextData
-        },
-        errors: [...state.errors, `Initialization error: ${error.message}`]
-      };
-    }
+    return state;
   }
 
   async finalizeNode(state) {
     logger.info("Finalizing API matching workflow");
-    
-    // Remove context completely and add identifiedSwaggerDocs at top level
-    const { context, ...stateWithoutContext } = state;
-    
+
     return {
-      ...stateWithoutContext,
+      ...state,
       currentNode: "finalize",
       metadata: {
         ...state.metadata,
         endTime: new Date().toISOString(),
         executionTime: Date.now() - new Date(state.metadata.startTime).getTime()
       },
-      // Add identifiedSwaggerDocs at top level
-      identifiedSwaggerDocs: state.identifiedSwaggerDocs || state.metadata.selectedContexts || [],
+      identifiedSwaggerDocs: state.identifiedSwaggerDocs || state.metadata.selectedContexts || []
     };
   }
 

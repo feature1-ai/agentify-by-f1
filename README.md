@@ -25,8 +25,7 @@ agentify-by-f1
 ├── BaseWorkflow (LangGraph DAG)
 ├── APIMatchingWorkflow
 │   ├── ContextSelector   ← reads your *.json specs from CONTEXT_DIR
-│   ├── IntentAnalyzer    ← codex exec
-│   ├── APIMapper         ← codex exec
+│   ├── APIMapper         ← codex exec (intent analysis + endpoint mapping)
 │   ├── ApprovalManager   ← gates every execution
 │   └── RestExecutor      ← axios → your API
 ├── REST API (sync / async-webhook / SSE stream)
@@ -367,7 +366,7 @@ export class MyCustomWorkflow extends BaseWorkflow {
 
 ```javascript
 // src/workflows/index.js
-import WorkflowRegistry from '../services/WorkflowRegistry.js';
+import WorkflowRegistry from '../WorkflowRegistry.js';
 import MyCustomWorkflow from './MyCustomWorkflow.js';
 
 WorkflowRegistry.register('my-custom', MyCustomWorkflow);
@@ -433,24 +432,26 @@ npm test -- --coverage
 
 ```
 src/
-├── core/               # Core workflow components
-│   └── BaseWorkflow.js
-├── executors/          # AI service executors  
-│   └── CodexExecutor.js
-├── workflows/          # Workflow implementations
-│   ├── APIMatchingWorkflow.js
-│   └── index.js
-├── api/                # REST API routes
-│   └── workflowRoutes.js
-├── services/           # Business logic services
-│   └── WorkflowRegistry.js
-├── middleware/         # Express middleware
-│   └── errorHandler.js
-├── utils/              # Utilities
-│   └── logger.js
-├── config/             # Configuration management
-│   └── index.js
-└── index.js            # Application entry point
+├── index.js            # Express app: security middleware, static UI, routes
+├── workflowRoutes.js   # REST API routes
+├── WorkflowRegistry.js # Workflow classes + live instance records
+├── errorHandler.js     # asyncHandler / 404 / error middleware
+├── logger.js           # Winston logger
+├── contextDir.js       # CONTEXT_DIR resolution (single source of truth)
+├── executors/
+│   ├── CodexExecutor.js  # codex exec subprocess (the reasoning layer)
+│   └── RestExecutor.js   # axios client for the user's REST API
+└── workflows/
+    ├── index.js              # registration + WORKFLOWS_ENABLED filter
+    ├── BaseWorkflow.js       # LangGraph DAG scaffolding
+    ├── APIMatchingWorkflow.js
+    └── api-matching/         # services owned by APIMatchingWorkflow
+        ├── ContextSelector.js
+        ├── APIMapper.js
+        ├── ParameterExtractor.js
+        ├── ApprovalManager.js
+        ├── ApprovalMessageFormatter.js
+        └── ResponseFormatter.js
 ```
 
 ## Environment Variables

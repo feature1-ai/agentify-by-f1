@@ -1,11 +1,18 @@
 import { StateGraph, END } from "@langchain/langgraph";
 import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import logger from '../utils/logger.js';
+import logger from '../logger.js';
+import { resolveContextDir } from '../contextDir.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+/**
+ * State convention: every node returns the FULL next state (spread `...state`,
+ * then override what changed), so every channel uses last-write-wins semantics.
+ * Subclasses that need extra top-level state keys extend defineChannels().
+ */
+export const lastWriteChannel = (defaultValue) => ({
+  value: (_previous, next) => next,
+  default: defaultValue
+});
 
 export class BaseWorkflow {
   constructor(workflowId, config = {}) {
@@ -13,8 +20,6 @@ export class BaseWorkflow {
     this.config = {
       maxRetries: 3,
       timeout: 30000,
-      contextPath: 'resources/contexts',
-      templatesPath: 'resources/templates',
       ...config
     };
     this.graph = null;
@@ -28,28 +33,37 @@ export class BaseWorkflow {
     };
   }
 
+  // Streaming progress is an optional capability; the default no-op lets
+  // callers set/clear handlers on any workflow without feature-detection.
+  setStreamProgressHandler(_handler) {}
+
+  // Approval is an optional capability; workflows that pause for approval
+  // (see APIMatchingWorkflow) override this.
+  async processApprovalResponse(_response) {
+    return {
+      success: false,
+      error: 'Workflow does not support approval operations'
+    };
+  }
+
   async loadContext(contextFiles = []) {
     try {
-      const contextPath = process.env.CONTEXT_DIR
-        ? (path.isAbsolute(process.env.CONTEXT_DIR)
-            ? process.env.CONTEXT_DIR
-            : path.resolve(process.cwd(), process.env.CONTEXT_DIR))
-        : path.join(__dirname, '../../', this.config.contextPath);
+      const contextPath = resolveContextDir();
 
       for (const file of contextFiles) {
         const filePath = path.join(contextPath, file);
         const content = await fs.readFile(filePath, 'utf-8');
         const fileExt = path.extname(file);
-        
+
         if (fileExt === '.json') {
           this.contextData[file] = JSON.parse(content);
         } else {
           this.contextData[file] = content;
         }
-        
+
         logger.info(`Loaded context file: ${file}`);
       }
-      
+
       return this.contextData;
     } catch (error) {
       logger.error(`Error loading context: ${error.message}`);
@@ -57,73 +71,24 @@ export class BaseWorkflow {
     }
   }
 
-  async loadTemplate(templateName) {
-    try {
-      const templatePath = path.join(
-        __dirname, 
-        '../../', 
-        this.config.templatesPath, 
-        `${templateName}.txt`
-      );
-      const template = await fs.readFile(templatePath, 'utf-8');
-      return template;
-    } catch (error) {
-      logger.error(`Error loading template ${templateName}: ${error.message}`);
-      throw error;
-    }
+  defineChannels() {
+    return {
+      messages: lastWriteChannel(() => []),
+      context: lastWriteChannel(() => ({})),
+      metadata: lastWriteChannel(() => ({})),
+      errors: lastWriteChannel(() => []),
+      currentNode: lastWriteChannel(() => 'start')
+    };
   }
 
   buildGraph() {
-    const workflow = new StateGraph({
-      channels: {
-        messages: {
-          value: (oldMessages, newMessages) => {
-            // Properly append new messages to existing ones
-            const existing = oldMessages || [];
-            const toAdd = newMessages || [];
-            
-            // If toAdd is the entire messages array (includes old ones), just return it
-            if (toAdd.length > 0 && toAdd === newMessages) {
-              // Check if this is a replacement (contains the old messages already)
-              const hasOldContent = existing.length > 0 && 
-                toAdd.some(msg => existing.some(old => 
-                  old.content === msg.content && old.role === msg.role));
-              
-              if (hasOldContent || toAdd.length >= existing.length) {
-                return toAdd;
-              }
-            }
-            
-            // Otherwise append genuinely new messages
-            return [...existing, ...toAdd.filter(msg => 
-              !existing.some(old => old.content === msg.content && old.role === msg.role))];
-          },
-          default: () => []
-        },
-        context: {
-          value: (oldContext, newContext) => ({ ...oldContext, ...newContext }),
-          default: () => ({})
-        },
-        metadata: {
-          value: (oldMeta, newMeta) => ({ ...oldMeta, ...newMeta }),
-          default: () => ({})
-        },
-        errors: {
-          value: (oldErrors, newErrors) => [...oldErrors, ...newErrors],
-          default: () => []
-        },
-        currentNode: {
-          value: (_, newNode) => newNode,
-          default: () => 'start'
-        }
-      }
-    });
+    const workflow = new StateGraph({ channels: this.defineChannels() });
 
     this.defineNodes(workflow);
     this.defineEdges(workflow);
-    
+
     workflow.setEntryPoint(this.getEntryPoint());
-    
+
     this.graph = workflow.compile();
     return this.graph;
   }
@@ -245,22 +210,22 @@ export class BaseWorkflow {
     return "continue";
   }
 
+  buildInitialState(input) {
+    return {
+      ...this.state,
+      messages: [{ role: "user", content: input }],
+      metadata: {
+        inputReceived: new Date().toISOString()
+      }
+    };
+  }
+
   async execute(input) {
     try {
       if (!this.graph) {
         this.buildGraph();
       }
-
-      const initialState = {
-        ...this.state,
-        messages: [{ role: "user", content: input }],
-        metadata: {
-          inputReceived: new Date().toISOString()
-        }
-      };
-
-      const result = await this.graph.invoke(initialState);
-      return result;
+      return await this.graph.invoke(this.buildInitialState(input));
     } catch (error) {
       logger.error(`Workflow execution error: ${error.message}`);
       throw error;
@@ -272,17 +237,7 @@ export class BaseWorkflow {
       if (!this.graph) {
         this.buildGraph();
       }
-
-      const initialState = {
-        ...this.state,
-        messages: [{ role: "user", content: input }],
-        metadata: {
-          inputReceived: new Date().toISOString()
-        }
-      };
-
-      const stream = await this.graph.stream(initialState);
-      return stream;
+      return await this.graph.stream(this.buildInitialState(input));
     } catch (error) {
       logger.error(`Workflow stream error: ${error.message}`);
       throw error;

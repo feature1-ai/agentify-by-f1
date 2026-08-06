@@ -1,24 +1,13 @@
 import { spawn } from 'child_process';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import logger from '../utils/logger.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const DEFAULT_CONTEXT_DIR = path.join(__dirname, '../../resources/contexts');
-
-function resolveContextDir(value) {
-  if (!value) return DEFAULT_CONTEXT_DIR;
-  return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
-}
+import logger from '../logger.js';
+import { resolveContextDir } from '../contextDir.js';
 
 export class CodexExecutor {
   constructor(config = {}) {
     this.config = {
       maxTokens: parseInt(process.env.CODEX_MAX_TOKENS) || 4000,
       temperature: parseFloat(process.env.CODEX_TEMPERATURE) || 0.7,
-      workingDir: resolveContextDir(process.env.CONTEXT_DIR),
+      workingDir: resolveContextDir(),
       ...config
     };
   }
@@ -112,83 +101,6 @@ export class CodexExecutor {
               responseLength: output.length,
               maxTokens: mergedOptions.maxTokens,
               temperature: mergedOptions.temperature
-            }
-          });
-        } else {
-          logger.error('Codex process exited', { code, signal, executionTime });
-          reject({
-            success: false,
-            error: `Process exited with code ${code}`,
-            stderr: errorOutput,
-            executionTime
-          });
-        }
-      });
-
-    });
-  }
-
-  async executeStream(prompt, context = {}, options = {}, onData) {
-    const fullPrompt = this.buildPromptWithContext(prompt, context);
-    const mergedOptions = { ...this.config, ...options };
-
-    return new Promise((resolve, reject) => {
-      const startTime = Date.now();
-      let output = '';
-      let errorOutput = '';
-
-      const args = [
-        'exec',
-        '--stream',
-        '--max-tokens', mergedOptions.maxTokens.toString(),
-        '--temperature', mergedOptions.temperature.toString(),
-        fullPrompt
-      ];
-
-      logger.info('Executing Codex in stream mode', { cwd: mergedOptions.workingDir });
-
-      const codexProcess = spawn('codex', args, {
-        env: process.env,
-        cwd: mergedOptions.workingDir
-      });
-
-      codexProcess.stdout.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-
-        if (onData && typeof onData === 'function') {
-          onData(chunk);
-        }
-      });
-
-      codexProcess.stderr.on('data', (data) => {
-        const stderrChunk = data.toString();
-        errorOutput += stderrChunk;
-        logger.debug('Codex stderr', { stderr: stderrChunk.trim() });
-      });
-
-      codexProcess.on('error', (error) => {
-        logger.error('Failed to start Codex process:', error);
-        reject({
-          success: false,
-          error: error.message,
-          details: 'Failed to start Codex CLI. Ensure it is installed and accessible.'
-        });
-      });
-
-      codexProcess.on('close', (code, signal) => {
-        const executionTime = Date.now() - startTime;
-
-        if (code === 0) {
-          logger.info(`Codex stream execution completed in ${executionTime}ms`);
-          resolve({
-            success: true,
-            output: output.trim(),
-            executionTime,
-            metadata: {
-              promptLength: fullPrompt.length,
-              responseLength: output.length,
-              mode: 'stream'
             }
           });
         } else {

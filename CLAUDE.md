@@ -39,9 +39,9 @@ Default: `<app>/resources/contexts/`. Users drop their `*.json` OpenAPI specs th
 
 ## ContextSelector — generic auto-discover
 
-Default: every `*.json` file in `CONTEXT_DIR` (except `context-rules.json`) is treated as a candidate spec.
+Default: every `*.json` file in `CONTEXT_DIR` (except `context-rules.json`) is treated as a candidate spec and loaded for the agent.
 
-Optional: drop `context-rules.json` in `CONTEXT_DIR` to define keyword→file scoring and multi-file scenario regexes — useful when the spec set is large enough that sending all of them blows the model's context window. Shape is documented in the README.
+Optional: drop `context-rules.json` in `CONTEXT_DIR` to define keyword→file scoring and multi-file scenario regexes — useful when the spec set is large enough that sending all of them blows the model's context window. The rules are applied in `APIMatchingWorkflow.initializeNode` (via `ContextSelector.selectContexts`) to narrow which spec files get loaded. Shape is documented in the README.
 
 ## Codex CLI install in Docker
 
@@ -50,11 +50,11 @@ The Dockerfile installs the real OpenAI Codex CLI via `npm install -g @openai/co
 ## Tests
 
 Jest in ESM mode (`NODE_OPTIONS='--experimental-vm-modules' jest`). 5 suites:
-- `api.test.js` — Express endpoints
-- `BaseWorkflow.test.js` — context loading, graph build, routing
+- `api.test.js` — Express endpoints (incl. credential redaction + retry regression tests)
+- `BaseWorkflow.test.js` — context loading, graph build, routing, state accumulation
 - `CodexExecutor.test.js` — config / `CONTEXT_DIR` resolution
 - `setup.test.js` — repo structure sanity
-- `workflowPolicy.test.js` — feature-flag / removed-workflow guards
+- `workflows.test.js` — `WORKFLOWS_ENABLED` allow-list filtering
 
 Run: `OPENAI_API_KEY=dummy npm test`. (Tests never actually shell out to `codex` — they cover construction, config, and HTTP shape.)
 

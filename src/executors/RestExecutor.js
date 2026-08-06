@@ -1,5 +1,5 @@
 import axios from 'axios';
-import logger from '../utils/logger.js';
+import logger from '../logger.js';
 
 /**
  * RestExecutor — generic HTTP executor used by the API Matching Workflow.

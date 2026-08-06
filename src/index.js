@@ -4,9 +4,10 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import workflowRoutes from './api/workflowRoutes.js';
+import workflowRoutes from './workflowRoutes.js';
 import registerWorkflows from './workflows/index.js';
-import logger from './utils/logger.js';
+import logger from './logger.js';
+import { errorHandler, notFoundHandler } from './errorHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,22 +81,8 @@ app.get('/health', (req, res) => {
 
 app.use('/api', workflowRoutes);
 
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found'
-  });
-});
-
-app.use((err, req, res, next) => {
-  logger.error('Unhandled error:', err);
-  res.status(500).json({
-    success: false,
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message
-  });
-});
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 let server;
 

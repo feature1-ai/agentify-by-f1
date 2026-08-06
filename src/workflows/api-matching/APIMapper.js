@@ -1,4 +1,4 @@
-import logger from '../../utils/logger.js';
+import logger from '../../logger.js';
 
 /**
  * APIMapper - Maps a natural-language request to REST API calls by letting the
@@ -17,28 +17,20 @@ export class APIMapper {
   }
 
   /**
-   * Map a user request to API calls.
+   * Single agent call that performs intent analysis, context selection, and
+   * API mapping together by examining the spec files in the working directory.
    *
-   * @param {object|null} intent      Optional pre-extracted intent (unused in the
-   *                                   combined prompt; the agent extracts it too).
    * @param {object|null} allSwaggerDocs  Map of available spec filename → content.
-   * @param {string} userInput        The natural-language request.
-   * @param {object} options          { onProgress }.
+   * @param {string} userInput            The natural-language request.
+   * @param {object} options              { onProgress }.
    */
-  async mapToAPIs(intent, allSwaggerDocs = null, userInput = "", options = {}) {
+  async mapToAPIs(allSwaggerDocs = null, userInput = "", options = {}) {
     if (!this.codexExecutor) {
       throw new Error("APIMapper requires an agent executor (codex) to map APIs");
     }
 
     logger.info("Mapping request to REST APIs from the provided OpenAPI specs");
-    return this.aiBasedMappingWithContextSelection(intent, allSwaggerDocs, userInput, options);
-  }
 
-  /**
-   * Single agent call that performs intent analysis, context selection, and API
-   * mapping together by examining the spec files in the working directory.
-   */
-  async aiBasedMappingWithContextSelection(intent, allSwaggerDocs, userInput, options = {}) {
     const availableFiles = allSwaggerDocs && typeof allSwaggerDocs === 'object'
       ? Object.keys(allSwaggerDocs)
       : [];
@@ -89,19 +81,36 @@ Return all information as JSON:
 
     const result = await this.codexExecutor.execute(
       combinedPrompt,
-      {}, // No specific context needed since the agent examines the files directly
+      {}, // No context payload needed — the agent examines the files directly
       {
         temperature: 0.3,
         onProgress: options.onProgress
       }
     );
 
-    const response = JSON.parse(result.output);
+    const response = this.parseAgentJSON(result.output);
     logger.info(`Agent analyzed intent: ${response.intent?.action} ${response.intent?.resource}`);
     logger.info(`Agent selected contexts: ${response.relevantSwaggerDocs?.join(', ')}`);
     logger.info(`Agent mapped to ${response.apiCalls?.length || 0} API calls`);
 
     return response;
+  }
+
+  /**
+   * The agent's stdout often wraps the JSON payload in prose or log banners;
+   * fall back to extracting the outermost {...} block.
+   */
+  parseAgentJSON(output) {
+    try {
+      return JSON.parse(output);
+    } catch {
+      const start = output.indexOf('{');
+      const end = output.lastIndexOf('}');
+      if (start !== -1 && end > start) {
+        return JSON.parse(output.slice(start, end + 1));
+      }
+      throw new Error('Agent output contained no parsable JSON');
+    }
   }
 }
 

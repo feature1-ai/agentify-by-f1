@@ -1,10 +1,8 @@
 import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
 import request from 'supertest';
 import app from '../src/index.js';
-import WorkflowRegistry from '../src/services/WorkflowRegistry.js';
-import BaseWorkflow from '../src/core/BaseWorkflow.js';
-import { listAuditEvents, resetAuditEvents } from '../src/observability/auditStore.js';
-import { getCounter, resetTelemetry } from '../src/observability/telemetryStore.js';
+import WorkflowRegistry from '../src/WorkflowRegistry.js';
+import BaseWorkflow from '../src/workflows/BaseWorkflow.js';
 
 class TestWorkflow extends BaseWorkflow {
   async executeActionNode(state) {
@@ -61,7 +59,7 @@ describe('API Tests', () => {
     const response = await request(app)
       .get('/health')
       .set('X-API-Key', 'test-api-key');
-    
+
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.status).toBe('healthy');
@@ -72,7 +70,7 @@ describe('API Tests', () => {
     const response = await request(app)
       .get('/api/workflows')
       .set('X-API-Key', 'test-api-key');
-    
+
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.workflows).toContain('test-workflow');
@@ -90,7 +88,7 @@ describe('API Tests', () => {
     const response = await request(app)
       .get('/api/workflows/test-workflow')
       .set('X-API-Key', 'test-api-key');
-    
+
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.workflowId).toBe('test-workflow');
@@ -101,7 +99,7 @@ describe('API Tests', () => {
     const response = await request(app)
       .get('/api/workflows/non-existent')
       .set('X-API-Key', 'test-api-key');
-    
+
     expect(response.status).toBe(404);
     expect(response.body.success).toBe(false);
     expect(response.body.error).toContain('not found');
@@ -115,7 +113,7 @@ describe('API Tests', () => {
         workflowId: 'test-workflow',
         input: 'test input'
       });
-    
+
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.instanceId).toBeDefined();
@@ -130,7 +128,7 @@ describe('API Tests', () => {
       .send({
         workflowId: 'test-workflow'
       });
-    
+
     expect(response.status).toBe(400);
     expect(response.body.success).toBe(false);
     expect(response.body.error).toContain('required');
@@ -144,86 +142,10 @@ describe('API Tests', () => {
         workflowId: 'non-existent',
         input: 'test'
       });
-    
-    expect(response.status).toBe(404);
-    expect(response.body.success).toBe(false);
-    expect(response.body.error).toContain('not found');
-  });
-
-  test('POST /api/workflows/execute should reject removed workflow without creating instances', async () => {
-    const beforeCount = WorkflowRegistry.listInstances().length;
-
-    resetAuditEvents();
-    resetTelemetry();
-
-    const response = await request(app)
-      .post('/api/workflows/execute')
-      .set('X-API-Key', 'test-api-key')
-      .send({
-        workflowId: 'code-generation',
-        input: 'test'
-      });
 
     expect(response.status).toBe(404);
     expect(response.body.success).toBe(false);
     expect(response.body.error).toContain('not found');
-
-    const afterCount = WorkflowRegistry.listInstances().length;
-    expect(afterCount).toBe(beforeCount);
-    expect(WorkflowRegistry.listInstances('code-generation').length).toBe(0);
-
-    const auditEvents = listAuditEvents({
-      action: 'workflow_rejected',
-      workflowId: 'code-generation',
-      reason: 'unsupported-workflow',
-      endpoint: 'execute'
-    });
-    expect(auditEvents.length).toBe(1);
-
-    const counterValue = getCounter('workflow_rejected', {
-      workflowId: 'code-generation',
-      reason: 'unsupported-workflow',
-      endpoint: 'execute'
-    });
-    expect(counterValue).toBe(1);
-  });
-
-  test('POST /api/workflows/stream should reject removed workflow without artifacts', async () => {
-    const beforeCount = WorkflowRegistry.listInstances().length;
-
-    resetAuditEvents();
-    resetTelemetry();
-
-    const response = await request(app)
-      .post('/api/workflows/stream')
-      .set('X-API-Key', 'test-api-key')
-      .send({
-        workflowId: 'code-generation',
-        input: 'test'
-      });
-
-    expect(response.status).toBe(404);
-    expect(response.body.success).toBe(false);
-    expect(response.body.error).toContain('not found');
-
-    const afterCount = WorkflowRegistry.listInstances().length;
-    expect(afterCount).toBe(beforeCount);
-    expect(WorkflowRegistry.listInstances('code-generation').length).toBe(0);
-
-    const auditEvents = listAuditEvents({
-      action: 'workflow_rejected',
-      workflowId: 'code-generation',
-      reason: 'unsupported-workflow',
-      endpoint: 'stream'
-    });
-    expect(auditEvents.length).toBe(1);
-
-    const counterValue = getCounter('workflow_rejected', {
-      workflowId: 'code-generation',
-      reason: 'unsupported-workflow',
-      endpoint: 'stream'
-    });
-    expect(counterValue).toBe(1);
   });
 
   test('GET /api/instances should list workflow instances', async () => {
@@ -234,11 +156,11 @@ describe('API Tests', () => {
         workflowId: 'test-workflow',
         input: 'test'
       });
-    
+
     const response = await request(app)
       .get('/api/instances')
       .set('X-API-Key', 'test-api-key');
-    
+
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.instances).toBeDefined();
@@ -253,56 +175,18 @@ describe('API Tests', () => {
         workflowId: 'test-workflow',
         input: 'test'
       });
-    
+
     const instanceId = executeResponse.body.instanceId;
-    
+
     const response = await request(app)
       .get(`/api/instances/${instanceId}`)
       .set('X-API-Key', 'test-api-key');
-    
+
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.instance.instanceId).toBe(instanceId);
     expect(response.body.instance.workflowId).toBe('test-workflow');
     expect(response.body.instance.status).toBe('completed');
-  });
-
-  test('GET /api/instances/:instanceId should mark legacy records as unsupported', async () => {
-    const legacyInstanceId = 'legacy_code_generation_1';
-    WorkflowRegistry.addInstanceRecord(legacyInstanceId, {
-      workflowId: 'code-generation',
-      status: 'completed'
-    });
-
-    const response = await request(app)
-      .get(`/api/instances/${legacyInstanceId}`)
-      .set('X-API-Key', 'test-api-key');
-
-    expect(response.status).toBe(200);
-    expect(response.body.success).toBe(true);
-    expect(response.body.instance.instanceId).toBe(legacyInstanceId);
-    expect(response.body.instance.workflowId).toBe('code-generation');
-    expect(response.body.instance.status).toBe('unsupported-workflow');
-  });
-
-  test('POST /api/instances/:instanceId/retry should reject legacy records as unsupported', async () => {
-    const legacyInstanceId = 'legacy_code_generation_2';
-    WorkflowRegistry.addInstanceRecord(legacyInstanceId, {
-      workflowId: 'code-generation',
-      status: 'failed',
-      input: 'legacy input'
-    });
-
-    const response = await request(app)
-      .post(`/api/instances/${legacyInstanceId}/retry`)
-      .set('X-API-Key', 'test-api-key');
-
-    expect(response.status).toBe(400);
-    expect(response.body.success).toBe(false);
-    expect(response.body.code).toBe('unsupported-workflow');
-    expect(response.body.status).toBe('unsupported-workflow');
-    expect(response.body.workflowId).toBe('code-generation');
-    expect(response.body.instanceId).toBe(legacyInstanceId);
   });
 
   test('DELETE /api/instances/:instanceId should delete instance', async () => {
@@ -313,21 +197,21 @@ describe('API Tests', () => {
         workflowId: 'test-workflow',
         input: 'test'
       });
-    
+
     const instanceId = executeResponse.body.instanceId;
-    
+
     const response = await request(app)
       .delete(`/api/instances/${instanceId}`)
       .set('X-API-Key', 'test-api-key');
-    
+
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.message).toContain('deleted successfully');
-    
+
     const getResponse = await request(app)
       .get(`/api/instances/${instanceId}`)
       .set('X-API-Key', 'test-api-key');
-    
+
     expect(getResponse.status).toBe(404);
   });
 
@@ -335,7 +219,7 @@ describe('API Tests', () => {
     const response = await request(app)
       .get('/api/workflows')
       .set('X-API-Key', 'wrong-key');
-    
+
     expect(response.status).toBe(401);
     expect(response.body.success).toBe(false);
     expect(response.body.error).toContain('Invalid API key');
@@ -372,10 +256,34 @@ describe('API Tests', () => {
     expect(lastCredConfig.rest.authHeaderName).toBe('Authorization');
     expect(lastCredConfig.rest.authHeaderValue).toBe('Bearer super-secret');
 
-    // ...but the copy persisted on the instance record is redacted.
+    // ...but the display copy persisted on the instance record is redacted.
     const stored = WorkflowRegistry.getInstanceData(response.body.instanceId);
     expect(stored.config.rest.baseUrl).toBe('https://api.example.com');
     expect(stored.config.rest.authHeaderValue).toBe('***redacted***');
+  });
+
+  test('retry reuses the live credentials, not the redacted display copy', async () => {
+    const executeResponse = await request(app)
+      .post('/api/workflows/execute')
+      .set('X-API-Key', 'test-api-key')
+      .send({
+        workflowId: 'cred-workflow',
+        input: 'hi',
+        credentials: {
+          baseUrl: 'https://api.example.com',
+          authHeaderName: 'Authorization',
+          authHeaderValue: 'Bearer super-secret'
+        }
+      });
+
+    lastCredConfig = null;
+    const retryResponse = await request(app)
+      .post(`/api/instances/${executeResponse.body.instanceId}/retry`)
+      .set('X-API-Key', 'test-api-key');
+
+    expect(retryResponse.status).toBe(200);
+    expect(retryResponse.body.retriedFrom).toBe(executeResponse.body.instanceId);
+    expect(lastCredConfig.rest.authHeaderValue).toBe('Bearer super-secret');
   });
 
   test('execute rejects malformed credentials', async () => {
@@ -390,6 +298,29 @@ describe('API Tests', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.success).toBe(false);
+  });
+
+  test('approve endpoint returns 400 for workflows without approval support', async () => {
+    const executeResponse = await request(app)
+      .post('/api/workflows/execute')
+      .set('X-API-Key', 'test-api-key')
+      .send({
+        workflowId: 'test-workflow',
+        input: 'test'
+      });
+
+    const instanceId = executeResponse.body.instanceId;
+    const priorStatus = WorkflowRegistry.getInstanceData(instanceId).status;
+
+    const response = await request(app)
+      .post(`/api/workflows/${instanceId}/approve`)
+      .set('X-API-Key', 'test-api-key')
+      .send({ decision: 'approved' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.success).toBe(false);
+    // status must be restored, not left stuck on 'running'
+    expect(WorkflowRegistry.getInstanceData(instanceId).status).toBe(priorStatus);
   });
 
   test('GET / serves the chat UI without requiring an API key', async () => {

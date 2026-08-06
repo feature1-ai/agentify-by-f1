@@ -1,4 +1,4 @@
-import logger from '../../utils/logger.js';
+import logger from '../../logger.js';
 
 /**
  * ResponseFormatter - Responsible for formatting API responses for users
@@ -94,8 +94,7 @@ Your request is pending approval. You will be notified once it's processed.
 
 Please respond with:
 • "approve" to proceed
-• "reject" to cancel
-• "explain" for more details`;
+• "reject" to cancel`;
   }
 
   /**

@@ -1,5 +1,4 @@
-import logger from '../utils/logger.js';
-import { isRemovedWorkflow } from '../config/workflowPolicy.js';
+import logger from './logger.js';
 
 class WorkflowRegistry {
   constructor() {
@@ -12,15 +11,10 @@ class WorkflowRegistry {
       throw new Error('Workflow ID must be a non-empty string');
     }
 
-    if (isRemovedWorkflow(workflowId)) {
-      logger.warn(`Attempted to register removed workflow: ${workflowId}`);
-      return false;
-    }
-    
     if (typeof WorkflowClass !== 'function') {
       throw new Error('WorkflowClass must be a constructor function');
     }
-    
+
     this.workflows.set(workflowId, WorkflowClass);
     logger.info(`Registered workflow: ${workflowId}`);
     return true;
@@ -48,28 +42,23 @@ class WorkflowRegistry {
 
   createInstance(workflowId, config = {}) {
     const WorkflowClass = this.workflows.get(workflowId);
-    
+
     if (!WorkflowClass) {
       throw new Error(`Workflow ${workflowId} not found in registry`);
     }
-    
+
     const instanceId = `${workflowId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const instance = new WorkflowClass(instanceId, config);
-    
+
     this.instances.set(instanceId, {
       workflowId,
       instance,
       createdAt: new Date().toISOString(),
       status: 'created'
     });
-    
+
     logger.info(`Created workflow instance: ${instanceId}`);
     return { instanceId, instance };
-  }
-
-  getInstance(instanceId) {
-    const instanceData = this.instances.get(instanceId);
-    return instanceData ? instanceData.instance : null;
   }
 
   getInstanceData(instanceId) {
@@ -91,29 +80,6 @@ class WorkflowRegistry {
     }
     Object.assign(instanceData, updates);
     instanceData.updatedAt = new Date().toISOString();
-    return true;
-  }
-
-  addInstanceRecord(instanceId, record = {}) {
-    if (!instanceId || typeof instanceId !== 'string') {
-      throw new Error('Instance ID must be a non-empty string');
-    }
-    const { workflowId } = record;
-    if (!workflowId || typeof workflowId !== 'string') {
-      throw new Error('Workflow ID must be a non-empty string');
-    }
-
-    const createdAt = record.createdAt || new Date().toISOString();
-    this.instances.set(instanceId, {
-      workflowId,
-      instance: record.instance || null,
-      status: record.status || 'created',
-      createdAt,
-      updatedAt: record.updatedAt || createdAt,
-      input: record.input,
-      context: record.context,
-      config: record.config
-    });
     return true;
   }
 
