@@ -359,6 +359,69 @@
       }
     }
 
+    // Human-readable stage labels for the workflow's LangGraph nodes.
+    const NODE_LABELS = {
+      initialize: 'reading your API specs…',
+      mapAPIs: 'mapping your request to API endpoints…',
+      extractParameters: 'extracting parameters…',
+      requestApproval: 'preparing the approval…',
+      executeAPIs: 'calling your API…',
+      formatResponse: 'writing the response…',
+      finalize: 'finishing up…',
+      handleError: 'handling an error…'
+    };
+
+    // Consume the /workflows/stream SSE response: `codex_thinking` events are
+    // live agent stdout; unnamed data frames are per-node state updates; the
+    // last node's state is the workflow result.
+    async function consumeStream(res, onProgress) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let state = null;
+      let error = null;
+      let stage = 'working…';
+
+      const handleFrame = (frame) => {
+        let eventName = 'message';
+        const dataLines = [];
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+        }
+        if (!dataLines.length) return;
+        const raw = dataLines.join('\n');
+        if (raw === '[DONE]') return;
+
+        let payload;
+        try { payload = JSON.parse(raw); } catch { return; }
+
+        if (eventName === 'codex_thinking') {
+          const lastLine = String(payload.chunk || '').trim().split('\n').pop() || '';
+          onProgress(`⚙ ${stage}${lastLine ? '\n' + lastLine.slice(0, 160) : ''}`);
+          return;
+        }
+        if (payload.error) { error = payload.error; return; }
+        for (const [node, nodeState] of Object.entries(payload)) {
+          if (nodeState && typeof nodeState === 'object') state = nodeState;
+          if (NODE_LABELS[node]) stage = NODE_LABELS[node];
+        }
+        onProgress(`⚙ ${stage}`);
+      };
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          handleFrame(buffer.slice(0, idx));
+          buffer = buffer.slice(idx + 2);
+        }
+      }
+      return { state, error };
+    }
+
     async function send() {
       const text = $('input').value.trim();
       if (!text || busy) return;
@@ -371,25 +434,40 @@
       autosize();
       addMessage('user', text);
       busy = true; $('sendBtn').disabled = true;
-      const thinking = addMessage('assistant', 'Thinking…', { muted: true });
+      const thinking = addMessage('assistant', '⚙ starting…', { muted: true });
       try {
-        const res = await fetch(api('/workflows/execute'), {
+        const res = await fetch(api('/workflows/stream'), {
           method: 'POST', headers: headers(),
           body: JSON.stringify({ workflowId, input: text, credentials: buildCredentials() })
         });
-        const data = await res.json();
-        thinking.parentElement.remove();
-        if (res.status === 401 && data.authMode === 'oidc') {
-          addMessage('assistant', '🔒 Your session has expired — please sign in again.', { muted: true });
-          fetchMe();
+
+        // Auth/validation failures answer with plain JSON before the stream opens.
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('text/event-stream')) {
+          const data = await res.json().catch(() => ({}));
+          thinking.parentElement.remove();
+          if (res.status === 401 && data.authMode === 'oidc') {
+            addMessage('assistant', '🔒 Your session has expired — please sign in again.', { muted: true });
+            fetchMe();
+            return;
+          }
+          addMessage('assistant', `⚠ ${data.error || 'Request failed'}`, { muted: true });
           return;
         }
-        if (!data.success) { addMessage('assistant', `⚠ ${data.error || 'Request failed'}`, { muted: true }); return; }
-        const result = data.result || {};
-        if (result?.metadata?.approvalStatus === 'pending') {
-          renderApproval(data.instanceId, result);
+
+        const instanceId = res.headers.get('X-Instance-Id');
+        const { state, error } = await consumeStream(res, (progress) => {
+          thinking.textContent = progress;
+          scrollDown();
+        });
+        thinking.parentElement.remove();
+
+        if (error) { addMessage('assistant', `⚠ ${error}`, { muted: true }); return; }
+        if (!state) { addMessage('assistant', '⚠ The stream ended without a result.', { muted: true }); return; }
+        if (state?.metadata?.approvalStatus === 'pending') {
+          renderApproval(instanceId, state);
         } else {
-          addMessage('assistant', lastAssistant(result) || 'Done.');
+          addMessage('assistant', lastAssistant(state) || 'Done.');
         }
       } catch (e) {
         thinking.parentElement.remove();

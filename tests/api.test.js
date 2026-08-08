@@ -19,6 +19,18 @@ class TestWorkflow extends BaseWorkflow {
   }
 }
 
+// Ends its run flagged as awaiting approval, like the api-matching workflow
+// does when it pauses — exercises the stream endpoint's status handling.
+class PendingApprovalWorkflow extends BaseWorkflow {
+  async executeActionNode(state) {
+    return {
+      ...state,
+      currentNode: "executeAction",
+      metadata: { ...state.metadata, complete: true, approvalStatus: 'pending' }
+    };
+  }
+}
+
 // Captures the config it was constructed with so tests can assert that
 // per-request credentials reach the live workflow instance.
 let lastCredConfig = null;
@@ -42,6 +54,7 @@ describe('API Tests', () => {
   beforeAll(() => {
     process.env.NODE_ENV = 'test';
     WorkflowRegistry.register('test-workflow', TestWorkflow);
+    WorkflowRegistry.register('pending-workflow', PendingApprovalWorkflow);
     WorkflowRegistry.register('cred-workflow', CredentialCaptureWorkflow);
     process.env.API_KEY = 'test-api-key';
   });
@@ -75,7 +88,7 @@ describe('API Tests', () => {
     expect(response.body.success).toBe(true);
     expect(response.body.workflows).toContain('test-workflow');
     expect(response.body.workflows).toContain('api-matching');
-    expect(response.body.count).toBe(3);
+    expect(response.body.count).toBe(4);
   });
 
   test('WorkflowRegistry.list should include registered workflows', () => {
@@ -213,6 +226,44 @@ describe('API Tests', () => {
       .set('X-API-Key', 'test-api-key');
 
     expect(getResponse.status).toBe(404);
+  });
+
+  test('POST /api/workflows/stream emits SSE node states and [DONE]', async () => {
+    const response = await request(app)
+      .post('/api/workflows/stream')
+      .set('X-API-Key', 'test-api-key')
+      .send({ workflowId: 'test-workflow', input: 'stream me' });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('text/event-stream');
+
+    const instanceId = response.headers['x-instance-id'];
+    expect(instanceId).toBeDefined();
+
+    const frames = response.text.split('\n\n').filter(Boolean);
+    expect(frames[frames.length - 1]).toBe('data: [DONE]');
+
+    // Node-state frames are { nodeName: state } objects.
+    const nodeFrames = frames
+      .filter((f) => f.startsWith('data: ') && !f.includes('[DONE]'))
+      .map((f) => JSON.parse(f.slice(6)));
+    expect(nodeFrames.length).toBeGreaterThan(0);
+    expect(Object.keys(nodeFrames[0])[0]).toBe('initialize');
+
+    // The stream path records the result and a real final status.
+    expect(WorkflowRegistry.getInstanceData(instanceId).status).toBe('completed');
+    expect(WorkflowRegistry.getInstanceData(instanceId).result.metadata.testExecuted).toBe(true);
+  });
+
+  test('streaming a workflow that pauses for approval records awaiting_approval', async () => {
+    const response = await request(app)
+      .post('/api/workflows/stream')
+      .set('X-API-Key', 'test-api-key')
+      .send({ workflowId: 'pending-workflow', input: 'needs approval' });
+
+    expect(response.status).toBe(200);
+    const instanceId = response.headers['x-instance-id'];
+    expect(WorkflowRegistry.getInstanceData(instanceId).status).toBe('awaiting_approval');
   });
 
   test('API should reject requests without valid API key', async () => {

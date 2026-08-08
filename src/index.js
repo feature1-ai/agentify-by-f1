@@ -37,7 +37,10 @@ app.use(helmet());
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   methods: ['GET', 'POST', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+  // The stream endpoint reports the created instance via this header; the
+  // browser needs it exposed to run the approval flow cross-origin.
+  exposedHeaders: ['X-Instance-Id']
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));

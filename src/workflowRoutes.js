@@ -248,11 +248,18 @@ router.post('/workflows/stream', asyncHandler(async (req, res) => {
   try {
     const stream = await instance.stream(input);
 
+    // LangGraph yields { [nodeName]: stateAfterNode } per step; the last
+    // node's state is the workflow result, same shape the execute path gets.
+    let finalState = null;
     for await (const chunk of stream) {
+      for (const nodeState of Object.values(chunk)) {
+        finalState = nodeState;
+      }
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
     }
 
-    WorkflowRegistry.updateInstanceStatus(instanceId, 'completed');
+    WorkflowRegistry.updateInstanceStatus(instanceId, statusFromResult(finalState));
+    WorkflowRegistry.updateInstanceData(instanceId, { result: finalState });
     res.write(`data: [DONE]\n\n`);
   } catch (error) {
     WorkflowRegistry.updateInstanceStatus(instanceId, 'failed');
