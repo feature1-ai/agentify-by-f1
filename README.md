@@ -171,6 +171,7 @@ agentify-by-f1 never touches your database, data warehouse, or internal data sto
 - **Nothing new to expose.** No DB credentials, no read replica, no data pipeline, no raw queries. If your API can do it, the agent can; if it can't, the agent can't.
 - **Your existing authorization still applies.** Calls go out with the caller's auth (per-request `credentials` or a server-wide token), so every permission check, validation rule, rate limit, and audit log your API already enforces applies unchanged — the agent can't exceed what that credential is allowed to do.
 - **Smaller blast radius.** A misbehaving or compromised agent is bounded by the API surface and the credential's scope; it cannot bypass the API to read or write data directly.
+- **Malicious input is flagged and blocked.** Two layers: a deterministic screen catches prompt-injection and secret-exfiltration phrasing before the agent even runs, and the intent classifier itself flags requests that try to escape the API surface or sweep-destroy data. Flagged requests get a blocked response — no calls planned, nothing sent for approval. (Legitimate destructive requests aren't blocked; those go through risk assessment and mandatory human approval.)
 - **No schema coupling.** It reasons over your OpenAPI spec, not your database schema, so internal data-model changes stay invisible to the agent.
 
 In short: adopting agentify-by-f1 is a matter of pointing it at an API you already trust — not granting a new system access to production data.

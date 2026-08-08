@@ -35,8 +35,12 @@ export class ResponseFormatter {
    */
   formatMarkdown(executionResults, intent, userInput, context) {
     const sections = [];
-    
+
     // Handle special cases
+    if (context.flagged) {
+      return this.formatBlocked(userInput, context.flagged);
+    }
+
     if (context.rejected) {
       return this.formatRejection(userInput, context.rejectionReason);
     }
@@ -65,6 +69,22 @@ export class ResponseFormatter {
     }
     
     return sections.filter(Boolean).join('\n\n');
+  }
+
+  /**
+   * Format blocked (malicious input) response
+   */
+  formatBlocked(userInput, flagged) {
+    return `🚫 **Request Blocked**
+
+**Request:** "${userInput}"
+
+This request was flagged as potentially malicious and was not processed.
+
+**Reason:** ${flagged.reason || 'flagged by the intent classifier'}
+
+No API calls were planned or executed. If this was a mistake, rephrase the
+request in terms of your API's normal operations.`;
   }
 
   /**

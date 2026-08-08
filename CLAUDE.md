@@ -14,6 +14,8 @@ The workflow (`src/workflows/APIMatchingWorkflow.js`) is a LangGraph DAG:
 
 Approval is mandatory for every execution (see `routeFromParameters`); the workflow pauses, returns an approval payload, and resumes via `processApprovalResponse`.
 
+Malicious input is flagged twice (`api-matching/intentGuard.js`): a deterministic heuristic screen in `initializeNode` (blocks before any codex run) and the agent's own `intent.malicious` assessment from `APIMapper`'s prompt. Either flag routes to a blocked response — no parameters, no approval, no API calls. Legitimate destructive requests are NOT flagged; that's what riskLevel + approval are for.
+
 ## Auth model — server-wide
 
 The Docker entrypoint (`scripts/docker-entrypoint.sh`) runs once at container start:
@@ -56,9 +58,10 @@ The Dockerfile installs the real OpenAI Codex CLI via `npm install -g @openai/co
 
 ## Tests
 
-Jest in ESM mode (`NODE_OPTIONS='--experimental-vm-modules' jest`). 6 suites:
+Jest in ESM mode (`NODE_OPTIONS='--experimental-vm-modules' jest`). 7 suites:
 - `api.test.js` — Express endpoints (incl. credential redaction + retry regression tests)
 - `auth.test.js` — AUTH_MODE resolution, SessionStore, oidc middleware, credential precedence
+- `intentGuard.test.js` — heuristic screen + full-workflow blocking of malicious input
 - `BaseWorkflow.test.js` — context loading, graph build, routing, state accumulation
 - `CodexExecutor.test.js` — config / `CONTEXT_DIR` resolution
 - `setup.test.js` — repo structure sanity

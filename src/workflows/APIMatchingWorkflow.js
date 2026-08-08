@@ -9,6 +9,7 @@ import ParameterExtractor from './api-matching/ParameterExtractor.js';
 import ApprovalManager from './api-matching/ApprovalManager.js';
 import ResponseFormatter from './api-matching/ResponseFormatter.js';
 import ContextSelector from './api-matching/ContextSelector.js';
+import { screenUserInput } from './api-matching/intentGuard.js';
 
 /**
  * APIMatchingWorkflow — maps a natural-language request onto the user's REST
@@ -84,6 +85,7 @@ export class APIMatchingWorkflow extends BaseWorkflow {
       this.routeFromParameters.bind(this),
       {
         approve: "requestApproval",
+        blocked: "formatResponse",
         error: "handleError"
       }
     );
@@ -112,11 +114,23 @@ export class APIMatchingWorkflow extends BaseWorkflow {
                        state.messages[0]?.content ||
                        "";
 
+      // Cheap deterministic screen first — an obviously malicious input
+      // never reaches the agent, and never costs a codex run.
+      const flagged = screenUserInput(userInput);
+      if (flagged) {
+        logger.warn('Blocked malicious input (heuristic screen)', {
+          workflowId: this.workflowId,
+          reason: flagged.reason
+        });
+      }
+
       // context-rules.json (if present) narrows which specs are loaded;
       // without rules every spec in CONTEXT_DIR is a candidate.
-      const selectedFiles = await this.contextSelector.selectContexts(userInput);
-      const allSwaggerDocs = await this.contextSelector.loadContexts(selectedFiles);
-      logger.info(`Loaded ${Object.keys(allSwaggerDocs).length} Swagger context(s) for agent analysis`);
+      const selectedFiles = flagged ? [] : await this.contextSelector.selectContexts(userInput);
+      const allSwaggerDocs = flagged ? {} : await this.contextSelector.loadContexts(selectedFiles);
+      if (!flagged) {
+        logger.info(`Loaded ${Object.keys(allSwaggerDocs).length} Swagger context(s) for agent analysis`);
+      }
 
       return {
         ...state,
@@ -126,7 +140,8 @@ export class APIMatchingWorkflow extends BaseWorkflow {
           startTime: new Date().toISOString(),
           workflowId: this.workflowId,
           userInput,
-          allSwaggerDocs
+          allSwaggerDocs,
+          ...(flagged && { flagged })
         }
       };
     } catch (error) {
@@ -146,6 +161,12 @@ export class APIMatchingWorkflow extends BaseWorkflow {
 
   async mapAPIsNode(state) {
     try {
+      // Already flagged by the heuristic screen — pass through untouched;
+      // routeFromParameters sends flagged state straight to the blocked response.
+      if (state.metadata.flagged) {
+        return { ...state, currentNode: "mapAPIs" };
+      }
+
       const { allSwaggerDocs, userInput } = state.metadata;
 
       // Single agent call performs intent analysis, context selection, and
@@ -156,6 +177,25 @@ export class APIMatchingWorkflow extends BaseWorkflow {
           ...progress
         })
       });
+
+      // Second layer: the agent's own malicious assessment from intent
+      // analysis. Checked before requiring apiCalls — a refusing agent may
+      // not have produced any.
+      if (result.intent?.malicious) {
+        const flagged = {
+          source: 'model',
+          reason: result.intent.maliciousReason || 'flagged as malicious by the intent classifier'
+        };
+        logger.warn('Blocked malicious input (intent classifier)', {
+          workflowId: this.workflowId,
+          reason: flagged.reason
+        });
+        return {
+          ...state,
+          currentNode: "mapAPIs",
+          metadata: { ...state.metadata, intent: result.intent, flagged }
+        };
+      }
 
       if (!Array.isArray(result.apiCalls)) {
         throw new Error('Agent response did not include an apiCalls array');
@@ -195,6 +235,10 @@ export class APIMatchingWorkflow extends BaseWorkflow {
 
   async extractParametersNode(state) {
     try {
+      if (state.metadata.flagged) {
+        return { ...state, currentNode: "extractParameters" };
+      }
+
       const { intent, apiCalls } = state.metadata;
       const apiCallsWithParams = this.parameterExtractor.extractParameters(intent, apiCalls);
 
@@ -335,6 +379,7 @@ export class APIMatchingWorkflow extends BaseWorkflow {
       const context = {
         workflowId: this.workflowId,
         approvalId: this.currentApprovalId,
+        flagged: state.metadata.flagged,
         rejected: approvalStatus === "rejected",
         pending: approvalStatus === "pending",
         rejectionReason: state.metadata.rejectionReason,
@@ -379,10 +424,14 @@ export class APIMatchingWorkflow extends BaseWorkflow {
     }
   }
 
-  // Approval is mandatory for every execution; the only branch is error.
+  // Approval is mandatory for every execution; flagged (malicious) input
+  // skips straight to the blocked response instead.
   routeFromParameters(state) {
     if (state.errors.length > 0) {
       return "error";
+    }
+    if (state.metadata.flagged) {
+      return "blocked";
     }
     return "approve";
   }

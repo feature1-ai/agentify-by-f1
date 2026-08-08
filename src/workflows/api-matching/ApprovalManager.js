@@ -41,11 +41,12 @@ export class ApprovalManager {
 
     this.pendingApprovals.set(approvalId, request);
 
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       if (this.pendingApprovals.has(approvalId)) {
         this.handleTimeout(approvalId);
       }
     }, this.config.defaultTimeout);
+    timer.unref?.(); // never hold the process open just for an expiry sweep
 
     return request;
   }
