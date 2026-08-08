@@ -26,7 +26,14 @@ After that, `codex exec` reuses the saved credential. There is no per-request Op
 
 For the user's REST API auth, `RestExecutor` reads `AUTH_HEADER_NAME` + `AUTH_HEADER_VALUE` at startup (e.g. `Authorization` / `Bearer eyJ…`).
 
-The REST endpoints themselves are gated by `X-API-Key` matching the `API_KEY` env (optional — if `API_KEY` is unset, the API is open).
+Access to agentify's own REST endpoints is controlled by `AUTH_MODE` (`src/auth/`):
+`none` (open), `api-key` (shared `X-API-Key` = `API_KEY` env; also the inferred
+mode when `AUTH_MODE` is unset but `API_KEY` is set), or `oidc` (company SSO,
+authorization code + PKCE via openid-client; discovery at boot, fail loud).
+OIDC sessions are in-memory (`SessionStore` — the swap-in seam for Redis);
+there is still no database. With `OIDC_FORWARD_ACCESS_TOKEN=true` the user's
+own access token becomes the downstream API auth — precedence: per-request
+`credentials` > forwarded SSO token > env defaults (see `applyCredentials`).
 
 ## Context directory
 
@@ -49,8 +56,9 @@ The Dockerfile installs the real OpenAI Codex CLI via `npm install -g @openai/co
 
 ## Tests
 
-Jest in ESM mode (`NODE_OPTIONS='--experimental-vm-modules' jest`). 5 suites:
+Jest in ESM mode (`NODE_OPTIONS='--experimental-vm-modules' jest`). 6 suites:
 - `api.test.js` — Express endpoints (incl. credential redaction + retry regression tests)
+- `auth.test.js` — AUTH_MODE resolution, SessionStore, oidc middleware, credential precedence
 - `BaseWorkflow.test.js` — context loading, graph build, routing, state accumulation
 - `CodexExecutor.test.js` — config / `CONTEXT_DIR` resolution
 - `setup.test.js` — repo structure sanity

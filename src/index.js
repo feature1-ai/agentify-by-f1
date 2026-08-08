@@ -2,12 +2,18 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import workflowRoutes from './workflowRoutes.js';
 import registerWorkflows from './workflows/index.js';
 import logger from './logger.js';
 import { errorHandler, notFoundHandler } from './errorHandler.js';
+import { resolveAuthMode } from './auth/mode.js';
+import { SessionStore } from './auth/SessionStore.js';
+import { initOidc } from './auth/oidc.js';
+import { createAuthRoutes } from './auth/routes.js';
+import { createApiAuth } from './auth/middleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +21,14 @@ const __dirname = path.dirname(__filename);
 dotenv.config();
 
 registerWorkflows();
+
+// OIDC discovery happens once at boot and fails loud; the other modes have
+// no setup. (Mode is re-resolved per request only for the none/api-key
+// split, which the tests toggle at runtime.)
+const bootAuthMode = resolveAuthMode();
+const sessions = new SessionStore();
+const oidc = bootAuthMode === 'oidc' ? await initOidc() : null;
+logger.info(`Auth mode: ${bootAuthMode}${oidc?.forwardAccessToken ? ' (forwarding user access tokens to the downstream API)' : ''}`);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,6 +41,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.path}`, {
@@ -36,22 +51,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Gate only the REST API (/api/*) with X-API-Key. The static chat UI, `/`,
-// and `/health` stay open so the page can load (and prompt for the key) and
-// container healthchecks work even when API_KEY is set.
-app.use('/api', (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
-  const expectedApiKey = process.env.API_KEY;
-
-  if (expectedApiKey && apiKey !== expectedApiKey) {
-    return res.status(401).json({
-      success: false,
-      error: 'Invalid API key'
-    });
-  }
-
-  next();
-});
+// Only /api/* is gated (by whichever AUTH_MODE is configured). The static
+// chat UI, `/`, `/health`, and `/auth/*` stay open so the page can load,
+// logins can start, and container healthchecks work.
+app.use('/auth', createAuthRoutes({ getMode: resolveAuthMode, sessions, oidc }));
+app.use('/api', createApiAuth({ getMode: resolveAuthMode, sessions }));
 
 // Serve static files from public directory (drop your own index.html here for a custom landing)
 app.use(express.static(path.join(__dirname, '../public')));

@@ -43,13 +43,21 @@ const approvalSchema = Joi.object({
   timestamp: Joi.string().optional()
 });
 
-const applyCredentials = (config = {}, credentials) => {
-  if (!credentials || Object.keys(credentials).length === 0) {
+/**
+ * Downstream auth precedence: explicit request credentials > the logged-in
+ * user's forwarded SSO access token (req.downstreamAuth, oidc mode with
+ * OIDC_FORWARD_ACCESS_TOKEN) > BASE_URL / AUTH_HEADER_* env defaults, which
+ * RestExecutor falls back to for anything left unset here.
+ * Exported for the auth test suite.
+ */
+export const applyCredentials = (config = {}, credentials, identityAuth) => {
+  const merged = { ...(identityAuth || {}), ...(credentials || {}) };
+  if (Object.keys(merged).length === 0) {
     return config || {};
   }
   return {
     ...(config || {}),
-    rest: { ...((config || {}).rest || {}), ...credentials }
+    rest: { ...((config || {}).rest || {}), ...merged }
   };
 };
 
@@ -168,7 +176,7 @@ router.post('/workflows/execute', asyncHandler(async (req, res) => {
     workflowId,
     input,
     context,
-    liveConfig: applyCredentials(config, credentials),
+    liveConfig: applyCredentials(config, credentials, req.downstreamAuth),
     extraRecordFields: { webhookUrl }
   });
 
@@ -219,7 +227,7 @@ router.post('/workflows/stream', asyncHandler(async (req, res) => {
     workflowId,
     input,
     context,
-    liveConfig: applyCredentials(config, credentials),
+    liveConfig: applyCredentials(config, credentials, req.downstreamAuth),
     extraRecordFields: { stream: true }
   });
 

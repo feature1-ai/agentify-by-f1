@@ -122,6 +122,9 @@
     <span class="spacer"></span>
     <span id="wfPill" class="pill">workflow: …</span>
     <span id="credPill" class="pill warn">no API credentials</span>
+    <span id="userPill" class="pill ok" style="display:none"></span>
+    <button id="loginBtn" class="primary" style="display:none">Sign in</button>
+    <button id="logoutBtn" style="display:none">Logout</button>
     <button id="settingsBtn">⚙ Settings</button>
   </header>
 
@@ -154,6 +157,7 @@
 
       <div class="section-title">Your REST API credentials</div>
       <p class="hint">These are forwarded per request as the downstream call's auth — each user can use their own token.</p>
+      <p class="hint" id="ssoHint" style="display:none">✅ You're signed in with SSO and your access token is forwarded automatically — the auth fields below are only needed as an override.</p>
       <div class="field">
         <label>Base URL of your API</label>
         <input id="apiBase" placeholder="https://api.example.com" />
@@ -208,10 +212,41 @@
       $('authValue').value = settings.authValue;
     }
     function refreshPills() {
-      const hasCred = settings.apiBase && settings.authValue;
+      const ssoForwarded = authInfo.authMode === 'oidc' && authInfo.authenticated && authInfo.forwardAccessToken;
+      const hasCred = (settings.apiBase && settings.authValue) || ssoForwarded;
       const pill = $('credPill');
-      pill.textContent = hasCred ? 'API credentials set' : 'no API credentials';
+      pill.textContent = ssoForwarded && !settings.authValue
+        ? 'SSO token forwarded'
+        : (hasCred ? 'API credentials set' : 'no API credentials');
       pill.className = 'pill ' + (hasCred ? 'ok' : 'warn');
+    }
+
+    // ---- authentication (AUTH_MODE=oidc deployments) ----
+    let authInfo = { authMode: 'none' };
+    // /auth lives at the server root, beside /api — derive it from the gateway base.
+    const authBase = () => settings.gwBase.replace(/\/api\/?$/, '');
+
+    async function fetchMe() {
+      try {
+        const res = await fetch(authBase() + '/auth/me');
+        if (res.ok) authInfo = await res.json();
+      } catch { /* server without /auth (older deploy) — keep defaults */ }
+      renderAuth();
+      refreshPills();
+    }
+
+    function renderAuth() {
+      const oidc = authInfo.authMode === 'oidc';
+      $('loginBtn').style.display = oidc && !authInfo.authenticated ? '' : 'none';
+      $('logoutBtn').style.display = oidc && authInfo.authenticated ? '' : 'none';
+      const pill = $('userPill');
+      if (oidc && authInfo.authenticated) {
+        pill.style.display = '';
+        pill.textContent = '👤 ' + (authInfo.user?.email || authInfo.user?.name || 'signed in');
+      } else {
+        pill.style.display = 'none';
+      }
+      $('ssoHint').style.display = oidc && authInfo.forwardAccessToken ? '' : 'none';
     }
 
     // Build the per-request credentials object from settings (omit empties).
@@ -327,6 +362,10 @@
     async function send() {
       const text = $('input').value.trim();
       if (!text || busy) return;
+      if (authInfo.authMode === 'oidc' && !authInfo.authenticated) {
+        addMessage('assistant', '🔒 Please sign in first (button in the top bar).', { muted: true });
+        return;
+      }
       if (!workflowId) { addMessage('assistant', '⚠ No workflow available. Check the gateway URL / API key in Settings.', { muted: true }); return; }
       $('input').value = '';
       autosize();
@@ -340,6 +379,11 @@
         });
         const data = await res.json();
         thinking.parentElement.remove();
+        if (res.status === 401 && data.authMode === 'oidc') {
+          addMessage('assistant', '🔒 Your session has expired — please sign in again.', { muted: true });
+          fetchMe();
+          return;
+        }
         if (!data.success) { addMessage('assistant', `⚠ ${data.error || 'Request failed'}`, { muted: true }); return; }
         const result = data.result || {};
         if (result?.metadata?.approvalStatus === 'pending') {
@@ -371,12 +415,18 @@
     $('saveSettings').onclick = saveSettings;
     $('overlay').onclick = (e) => { if (e.target === $('overlay')) closeDrawer(); };
     $('sendBtn').onclick = send;
+    $('loginBtn').onclick = () => { location.href = authBase() + '/auth/login'; };
+    $('logoutBtn').onclick = async () => {
+      try { await fetch(authBase() + '/auth/logout', { method: 'POST' }); } catch {}
+      location.reload();
+    };
     $('input').addEventListener('input', autosize);
     $('input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
 
     refreshPills();
+    fetchMe();
     loadWorkflow();
     if (!settings.apiBase) {
       addMessage('assistant',

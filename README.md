@@ -128,6 +128,42 @@ curl -X POST http://localhost:3000/api/workflows/execute \
 
 The live credential is held only on the in-memory workflow instance for the duration of the request (including the approval step); the copy kept on the instance record is redacted, so it never appears in `GET /api/instances/:id`.
 
+## Authentication
+
+Who may talk to agentify itself is controlled by `AUTH_MODE` (this is separate from the downstream API credentials above):
+
+| Mode | Behavior | When to use |
+| --- | --- | --- |
+| `none` | API is open | Local development |
+| `api-key` | One shared `X-API-Key` (the `API_KEY` env) | Demos, single-team installs |
+| `oidc` | Company SSO via OpenID Connect | Company deployments |
+
+With `AUTH_MODE` unset, the legacy behavior is preserved: setting `API_KEY` implies `api-key`, otherwise the API is open.
+
+### OIDC (SSO) mode
+
+Employees sign in with their existing work account (Okta, Microsoft Entra ID, Google Workspace, Keycloak — anything OIDC). Agentify keeps no user database: it validates the IdP's signed tokens and holds sessions in memory, so identity stays the IdP's job and the no-database model stays intact.
+
+```bash
+AUTH_MODE=oidc
+OIDC_ISSUER_URL=https://login.example.okta.com
+OIDC_CLIENT_ID=agentify
+OIDC_CLIENT_SECRET=...
+PUBLIC_BASE_URL=https://agentify.example.com   # IdP redirect URI: <PUBLIC_BASE_URL>/auth/callback
+```
+
+Register `<PUBLIC_BASE_URL>/auth/callback` as the redirect URI in your IdP. The chat UI shows a **Sign in** button, a user badge, and **Logout**; the flow is standard authorization code + PKCE (`/auth/login` → IdP → `/auth/callback`).
+
+**Access-token pass-through.** If your REST API accepts tokens from the same IdP, set `OIDC_FORWARD_ACCESS_TOKEN=true` and agentify forwards each logged-in user's own access token as the downstream `Authorization` header — every API call runs as the actual user, under your API's own permission model, and nobody pastes tokens into Settings. Precedence for downstream auth: explicit per-request `credentials` > forwarded SSO token > env defaults.
+
+Notes for `oidc` mode:
+- Sessions live in server memory (the browser cookie holds only a random id; tokens never reach the browser). A restart logs everyone out — with SSO, re-login is a silent redirect. Multiple replicas need sticky sessions, or swap `SessionStore` for a shared store (that class is the seam).
+- The chat UI must be served by agentify itself (same origin) — the session cookie does not cross origins.
+
+### Alternative: authenticate at the proxy
+
+If your infrastructure already fronts internal tools with oauth2-proxy, Cloudflare Access, Tailscale, or an ALB with OIDC, you can keep `AUTH_MODE=none` and let the proxy do all authentication — agentify then trusts whatever the proxy lets through. Terminate auth at the proxy, run agentify on a private network, and (optionally) still set `API_KEY` as a second factor between proxy and app.
+
 ## No direct data access
 
 agentify-by-f1 never touches your database, data warehouse, or internal data stores. It operates **exclusively through your existing REST API** — the same endpoints your app already exposes. The agent is just another API client.
