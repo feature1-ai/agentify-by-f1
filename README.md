@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/fy-shield.svg" alt="agentiFY shield" width="96" />
+</p>
+
 # agentify-by-f1
 
 **Drop in your OpenAPI spec + an `OPENAI_API_KEY`, get a REST-aware agent for your SPA.** Users converse with your app instead of clicking through UI — agentify-by-f1 maps natural-language intent to the right API call, asks for approval, and executes it.
