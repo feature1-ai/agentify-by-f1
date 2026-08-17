@@ -4,19 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>agentify-by-f1 — chat</title>
+  <link rel="icon" type="image/svg+xml" href="/fy-shield.svg" />
   <style>
+    /* agentiFY brand navy — surfaces derived from the shield's #14355F,
+       accent from its panel blue #3B7DD8. */
     :root {
-      --bg: #0f1419;
-      --panel: #1a2029;
-      --panel-2: #232b36;
-      --border: #2c3744;
-      --text: #e6edf3;
-      --muted: #8b97a5;
-      --accent: #4f9cf9;
-      --accent-2: #3b82f6;
-      --user: #2b3a4d;
-      --ok: #2ea043;
-      --danger: #d1242f;
+      --bg: #0B1D36;
+      --panel: #10294B;
+      --panel-2: #173563;
+      --border: #234676;
+      --text: #EAF1FA;
+      --muted: #8FA6C6;
+      --accent: #4C8CE0;
+      --accent-2: #3B7DD8;
+      --user: #1D4078;
+      --ok: #2FA36B;
+      --danger: #E05563;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
@@ -44,16 +47,16 @@
       border: 1px solid var(--border); border-radius: 999px;
       padding: 3px 10px;
     }
-    .pill.warn { color: #e3b341; border-color: #6b5a1f; }
-    .pill.ok { color: #3fb950; border-color: #2a4d2f; }
+    .pill.warn { color: #E8BC4F; border-color: #77622B; }
+    .pill.ok { color: #58C08A; border-color: #2C5B45; }
     button {
       font: inherit; cursor: pointer; border-radius: 8px;
       border: 1px solid var(--border); background: var(--panel-2);
       color: var(--text); padding: 8px 14px;
     }
-    button:hover { background: #2b3441; }
+    button:hover { background: #1C3A69; }
     button.primary { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
-    button.primary:hover { background: #2f74e0; }
+    button.primary:hover { background: #326DC0; }
     button.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
     button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -76,7 +79,7 @@
       border: 1px solid var(--border); background: var(--panel); border-radius: 10px;
       padding: 14px 16px; margin-top: 6px;
     }
-    .card h3 { margin: 0 0 8px; font-size: 13px; color: #e3b341; }
+    .card h3 { margin: 0 0 8px; font-size: 13px; color: #E8BC4F; }
     .card pre {
       background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
       padding: 10px; overflow-x: auto; font-size: 12px; margin: 8px 0; max-height: 260px;
@@ -117,6 +120,7 @@
 </head>
 <body>
   <header>
+    <img src="/fy-shield.svg" alt="" height="28" style="display:block" />
     <h1>agentify-by-f1</h1>
     <span class="sub">chat your REST API</span>
     <span class="spacer"></span>
