@@ -9,6 +9,7 @@ import workflowRoutes from './workflowRoutes.js';
 import registerWorkflows from './workflows/index.js';
 import logger from './logger.js';
 import { errorHandler, notFoundHandler } from './errorHandler.js';
+import { logCodexVersion } from './executors/CodexExecutor.js';
 import { resolveAuthMode } from './auth/mode.js';
 import { SessionStore } from './auth/SessionStore.js';
 import { initOidc } from './auth/oidc.js';
@@ -20,6 +21,7 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
+logCodexVersion();
 registerWorkflows();
 
 // OIDC discovery happens once at boot and fails loud; the other modes have
